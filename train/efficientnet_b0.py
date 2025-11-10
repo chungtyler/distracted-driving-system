@@ -156,7 +156,7 @@ def main():
         plot_losses(ax, epochs, train_losses, val_losses)
         plt.pause(0.1)
 
-    # Plot ROC and Confusion Matrix
+    # Plot Confusion Matrix
     model.eval()
     y_true = []
     y_predicted = []
@@ -173,6 +173,14 @@ def main():
             y_probabilities.extend(probabilities.cpu().numpy())
 
     plot_confusion_matrix(y_true, y_predicted, dataset.classes)
+
+    # Classification report (precision, recall, f1-score, support, accuracy, macro average, weighted average)
+    classification_report = metrics.classification_report(y_true, y_predicted, digits=3)
+    print(f"Classification Report:\n{classification_report}")
+
+    # Top-K accuracy
+    top_3_accuracy = metrics.top_k_accuracy_score(y_true, y_probabilities, k=3)
+    print(f"Top-3 Accuracy: {top_3_accuracy:.4f}")
 
     plt.ioff()
     plt.show()
