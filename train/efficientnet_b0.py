@@ -4,15 +4,36 @@ import torch.optim as optim
 from torch.utils.data import Subset, DataLoader
 from torchvision import datasets, models
 from sklearn.model_selection import train_test_split
+from sklearn import metrics
 import multiprocessing
-import time
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def plot_losses(ax, epoch, train_losses, val_losses):
+    ax.clear()
+    ax.plot(epoch, val_losses, label='Validation Loss', color='blue', linestyle='-')
+    ax.plot(epoch, train_losses, label='Training Loss', color='orange', linestyle='-')
+    ax.set_xlabel('Epochs')
+    ax.set_ylabel('Loss')
+    ax.set_title('Loss vs Epoch')
+    ax.legend()
+    ax.grid(True)
+
+def plot_confusion_matrix(y_true, y_predicted, class_names):
+    confusion_matrix = metrics.confusion_matrix(y_true, y_predicted)
+    plt.figure(figsize=(10,7))
+    sns.heatmap(confusion_matrix, annot=True, fmt='d', cmap='Blues', xticklabels=class_names, yticklabels=class_names)
+    plt.xlabel('Predicted Classes')
+    plt.ylabel('True Classes')
+    plt.title('Distracted Driving Classification Confusion Matrix')
+    plt.tight_layout()
 
 def val_model(model, val_loader, criterion, device):
     # Validate model based on inference (no weight updates)
     model.eval()
-    val_loss = 0.0
-    val_correct = 0
-    val_total = 0
+    running_loss = 0.0
+    correct = 0
+    total = 0
 
     with torch.no_grad():
         for images, labels in val_loader:
@@ -21,13 +42,14 @@ def val_model(model, val_loader, criterion, device):
             outputs = model(images) # Generate model predictions
             loss = criterion(outputs, labels) # Generate loss
 
-            val_loss += loss.item()  # Calculate validation loss
+            running_loss += loss.item()  # Calculate validation loss
             
             _, predicted = torch.max(outputs, 1) # Predicted class
-            val_correct += (predicted == labels).sum().item() # Number of correct predictions
-            val_total += labels.size(0) # Total number of samples
+            correct += (predicted == labels).sum().item() # Number of correct predictions
+            total += labels.size(0) # Total number of samples
 
-    val_accuracy = val_correct / val_total
+    val_accuracy = correct / total
+    val_loss = running_loss / len(val_loader)
     return val_loss, val_accuracy
     
 
@@ -53,9 +75,9 @@ def train_model(model, train_loader, optimizer, criterion, device):
         correct += (predicted == labels).sum().item() # Number of correct predictions
         total += labels.size(0) # Total number of samples
 
+    train_loss = running_loss / len(train_loader)
     train_accuracy = correct / total
-    
-    return running_loss, train_accuracy
+    return train_loss, train_accuracy
 
 def main():
     '''LOAD DATA'''
@@ -64,7 +86,7 @@ def main():
     transform = weights.transforms() # Convert input images to standard format
 
     # Load Dataset and Data Loaders
-    dataset_path = 'state-farm-distracted-driver-detection/imgs/train'
+    dataset_path = 'C:/UWaterloo/Courses/ME 744 - Computational Intelligence/state-farm-distracted-driver-detection/imgs/train'
     dataset = datasets.ImageFolder(root=dataset_path, transform=transform)
     y = dataset.targets
 
@@ -90,6 +112,8 @@ def main():
         nn.Linear(model.classifier[1].in_features, num_classes)     # Replace linear layer (1280, 1000) to (1280, num_classes)
     )
 
+    # LOAD MODEL
+
     '''TRAIN MODEL AND VALIDATE'''
     # Model Training
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # Cuda cores or CPU cores
@@ -97,27 +121,61 @@ def main():
 
     print(f"Model loaded {device}")
     
-    criterion = torch.nn.CrossEntropyLoss() # Loss function
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001) # Optimizer
+    criterion = nn.CrossEntropyLoss() # Loss function
+    optimizer = optim.Adam(model.parameters(), lr=0.001) # Optimizer
 
-    num_epochs = 20 # Number of epochs
+    num_epochs = 1 # Number of epochs
 
     best_val_accuracy = 0.0
+
+    # Plotting parameters
+    epochs = []
+    train_losses = []
+    val_losses = []
+    _, ax = plt.subplots()
 
     print("Training Starting...")
 
     # Train model and validate for each epoch updating the best model to save
     for epoch in range(num_epochs):
-        running_loss, train_accuracy = train_model(model, train_loader, optimizer, criterion, device)
+        train_loss, train_accuracy = train_model(model, train_loader, optimizer, criterion, device)
         val_loss, val_accuracy = val_model(model, val_loader, criterion, device)
 
-        print(f"Epoch {epoch+1}/{num_epochs} || Running Loss: {running_loss} || Training Accuracy: {train_accuracy} || Validation Loss: {val_loss} || Validation Accuracy: {val_accuracy}")
+        print(f"Epoch {epoch+1}/{num_epochs} || Training Loss: {train_loss} || Training Accuracy: {train_accuracy} || Validation Loss: {val_loss} || Validation Accuracy: {val_accuracy}")
 
         # Save best model based on validation accuracy
         if val_accuracy > best_val_accuracy:
             best_val_accuracy = val_accuracy
             torch.save(model.state_dict(), "efficientnet_distracted_driving.pth")
             print("Saved new best model!")
+
+        # Plot Loss vs Epoch Curve
+        epochs.append(epoch)
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
+        plot_losses(ax, epochs, train_losses, val_losses)
+        plt.pause(0.1)
+
+    # Plot ROC and Confusion Matrix
+    model.eval()
+    y_true = []
+    y_predicted = []
+    y_probabilities = []
+    with torch.no_grad():
+        for images, labels in val_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+            _, predicted = torch.max(outputs, 1) # Predicted class
+            probabilities = torch.softmax(outputs, 1) # Predicted class distribution
+
+            y_true.extend(labels.cpu().numpy())
+            y_predicted.extend(predicted.cpu().numpy())
+            y_probabilities.extend(probabilities.cpu().numpy())
+
+    plot_confusion_matrix(y_true, y_predicted, dataset.classes)
+
+    plt.ioff()
+    plt.show()
 
 if __name__=='__main__':
     multiprocessing.freeze_support()
