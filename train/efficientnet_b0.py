@@ -79,6 +79,21 @@ def train_model(model, train_loader, optimizer, criterion, device):
     train_accuracy = correct / total
     return train_loss, train_accuracy
 
+class EfficientNet:
+    def __init__(self, output_features):
+        self.weights = models.EfficientNet_B0_Weights.DEFAULT       # Pre-trained EfficientNet weights (B0 to B7)
+        self.transform = self.weights.transforms()                  # Convert input images to standard format
+        self.model = models.efficientnet_b0(weights=self.weights)   # Load EfficientNet model with Pre-trained weights
+
+        self.model.classifier = nn.Sequential(                                  # Replace linear layer to match classification problem
+            nn.Dropout(p=0.2, inplace=True),                                    # Reduce overfitting (drops 20% of neurons randomly)
+            nn.Linear(self.model.classifier[1].in_features, output_features)    # Replace linear layer (1280, 1000) to (1280, num_classes)
+        )
+
+    def load_weights(self, path):
+        self.model.load_state_dict(torch.load(path))
+
+
 def main():
     '''LOAD DATA'''
     # Load EfficientNet Weights and Input Pre-Processing Settings
@@ -105,14 +120,9 @@ def main():
 
     '''LOAD MODEL'''
     # Load and Edit Model
-    model = models.efficientnet_b0(weights=weights) # Load EfficientNet model with Pre-trained weights
-    num_classes = len(dataset.classes) # Get the number of classification classes
-    model.classifier = nn.Sequential(                               # Replace linear layer to match classification problem
-        nn.Dropout(p=0.2, inplace=True),                            # Reduce overfitting (drops 20% of neurons randomly)
-        nn.Linear(model.classifier[1].in_features, num_classes)     # Replace linear layer (1280, 1000) to (1280, num_classes)
-    )
-
-    # LOAD MODEL
+    efficientnet_b0 = EfficientNet(len(dataset.classes))
+    # efficientnet_b0.load_weights('efficientnet_b0.pth')
+    model = efficientnet_b0.model
 
     '''TRAIN MODEL AND VALIDATE'''
     # Model Training
