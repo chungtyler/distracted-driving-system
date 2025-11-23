@@ -10,7 +10,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from train.mobilenet_b0 import create_mobilenet_b0
-from framework.real_time_feed import run_real_time_feed
+from Archive.real_time_feed import run_real_time_feed
 
 MODEL_PATH = os.path.join(project_root, "models", "mobilenet_b0.pt")
 VIDEO_PATH = os.path.join(project_root, "input_video.mp4")

@@ -19,8 +19,6 @@ def preprocess_frame(frame, device):
     return tensor.to(device)
 
 
-
-
 def run_real_time_feed(video_path, model, class_names, device):
     cap = cv2.VideoCapture(video_path)
     model.to(device)

@@ -120,7 +120,6 @@ def apply_risk_action(risk):
     show_indicator(True)
     #autonomous_takeover()
 
-
 # ---------------------------------------------------------
 # MAIN REAL-TIME LOOP
 # ---------------------------------------------------------
