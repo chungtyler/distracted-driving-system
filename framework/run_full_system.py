@@ -4,25 +4,16 @@ import cv2
 import torch
 import numpy as np
 
-# ---------------------------------------------------------
-# FIX PYTHON PATH
-# ---------------------------------------------------------
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# ---------------------------------------------------------
-# IMPORTS
-# ---------------------------------------------------------
 from train.mobilenet_b0 import create_mobilenet_b0
 from framework.distraction_level.low_distraction import show_indicator
 # from framework.distraction_level.medium_disctriction import audio_warning
 # from framework.distraction_level.high_distraction import autonomous_takeover
 
-# ---------------------------------------------------------
-# PATHS
-# ---------------------------------------------------------
 MODEL_PATH = os.path.join(project_root, "models", "mobilenet_b0.pt")
 VIDEO_PATH = os.path.join(project_root, "input_video.mp4")
 
@@ -47,7 +38,6 @@ IMG_SIZE = 224
 MEAN = [0.485, 0.456, 0.406]
 STD = [0.229, 0.224, 0.225]
 
-
 def preprocess_frame(frame, device):
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     frame = cv2.resize(frame, (IMG_SIZE, IMG_SIZE)).astype("float32") / 255.0
@@ -55,7 +45,6 @@ def preprocess_frame(frame, device):
     frame = np.transpose(frame, (2, 0, 1))
     tensor = torch.tensor(frame, dtype=torch.float32).unsqueeze(0)
     return tensor.to(device)
-
 
 # ---------------------------------------------------------
 # RISK SCORING STATE

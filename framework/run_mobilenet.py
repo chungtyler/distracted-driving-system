@@ -1,24 +1,17 @@
+## Can delete this code since the real time video is implemented in run_full_system.pv but idk how LOL
+
 import os
 import sys
 import torch
 
-# ---------------------------------------------------------
-# Ensure project root is on sys.path
-# ---------------------------------------------------------
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# ---------------------------------------------------------
-# Imports from this repo
-# ---------------------------------------------------------
 from train.mobilenet_b0 import create_mobilenet_b0
 from framework.real_time_feed import run_real_time_feed
 
-# ---------------------------------------------------------
-# Paths & class names
-# ---------------------------------------------------------
 MODEL_PATH = os.path.join(project_root, "models", "mobilenet_b0.pt")
 VIDEO_PATH = os.path.join(project_root, "input_video.mp4")
 
@@ -36,7 +29,6 @@ class_names = [
     "c9: talking passenger",
 ]
 
-
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -46,17 +38,6 @@ def main():
 
     # Load checkpoint (dict with 'model_state', 'classes', etc.)
     print(f"Loading checkpoint from: {MODEL_PATH}")
-    # checkpoint = torch.load(MODEL_PATH, map_location=device)
-    #
-    # # If your file is a pure state_dict, comment out the next line and
-    # # use: model.load_state_dict(checkpoint)
-    # model.load_state_dict(checkpoint["model_state"])
-    #
-    # # Optional: override class_names from checkpoint if present
-    # if "classes" in checkpoint:
-    #     global class_names
-    #     class_names = checkpoint["classes"]
-    #     print("Loaded class names from checkpoint:", class_names)
 
     checkpoint = torch.load(MODEL_PATH, map_location=device)
 
@@ -64,12 +45,6 @@ def main():
         model.load_state_dict(checkpoint["model_state"])
     else:
         model.load_state_dict(checkpoint)
-
-    # DO NOT override class_names — we want the descriptive ones above
-    # if "classes" in checkpoint:
-    #     global class_names
-    #     class_names = checkpoint["classes"]
-    #     print("Loaded class names from checkpoint:", class_names)
 
     # Run the real-time video classification
     run_real_time_feed(
