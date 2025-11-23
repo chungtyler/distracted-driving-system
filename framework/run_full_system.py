@@ -154,7 +154,7 @@ def main():
     # Video
     cap = cv2.VideoCapture(VIDEO_PATH)
     if not cap.isOpened():
-        print(f"❌ Could not open video: {VIDEO_PATH}")
+        print(f"Could not open video: {VIDEO_PATH}")
         return
 
     global fps
@@ -192,7 +192,7 @@ def main():
             # Draw label on video
             label = f"{CLASS_NAMES[pred]} ({conf*100:.1f}%)"
             cv2.putText(frame, label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8, (0, 255, 0), 2)
+                        0.8, (0, 0, 255), 2)
 
             cv2.imshow("Driver Monitoring", frame)
 
