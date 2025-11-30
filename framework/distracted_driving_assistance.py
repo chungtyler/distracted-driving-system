@@ -1,31 +1,45 @@
-from distraction_level.low_distraction import show_indicator
-from distraction_level.medium_distrction import audio_warning
-from distraction_level.high_distraction import autonomous_takeover
+from framework.distraction_level.low_distraction import show_indicator
+from framework.distraction_level.medium_distrction import audio_warning
+from framework.distraction_level.high_distraction import autonomous_takeover
 from train.efficientnet_b0 import EfficientNet
 
 import torch
+import cv2
+import sys
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import keyboard
+import time
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
 # Initialize File Paths
-path_to_video = 'example.mp4'
+MODEL_PATH = os.path.join(project_root, "models", "efficientnet_b0.pth")
+VIDEO_PATH = os.path.join(project_root, "input_video.mp4")
 
-# Classification weights (higher = more distracted)
+# Classification weights [1 to 10] (higher = more distracted)
 distraction_severity = {
-    0: 1, # c0: safe driving
-    1: 1, # c1: texting - right
-    2: 1, # c2: talking on the phone - right
-    3: 1, # c3: texting - left
-    4: 1, # c4: talking on the phone - left
-    5: 1, # c5: operating the radio
-    6: 1, # c6: drinking
-    7: 1, # c7: reaching behind
-    8: 1, # c8: hair and makeup
-    9: 1 # c9: talking to passenger
+    0: 0, # c0: safe driving
+    1: 9, # c1: texting - right
+    2: 5, # c2: talking on the phone - right
+    3: 9, # c3: texting - left
+    4: 5, # c4: talking on the phone - left
+    5: 3, # c5: operating the radio
+    6: 4, # c6: drinking
+    7: 10, # c7: reaching behind
+    8: 8, # c8: hair and makeup
+    9: 5 # c9: talking to passenger
 }
-distraction_severity = torch.softmax(distraction_severity)
+distraction_severity = torch.tensor([0, 9, 5, 9, 5, 3, 4, 10, 8, 5], dtype=torch.float32) / 10.0
+#distraction_severity = torch.softmax(distraction_severity, dim=0)
 
 # Initialize classification model
 efficientnet_b0 = EfficientNet(len(distraction_severity))
-efficientnet_b0.load_weights('efficientnet_b0.pth')
+efficientnet_b0.load_weights(MODEL_PATH)
 model = efficientnet_b0.model
 model.eval()
 
@@ -35,14 +49,67 @@ driver_state_history = {'fps': 30, 'states': []}
 # Risk score calculation parameters
 batch_size = 5 # Number of seconds to process to calculate risk score
 current_frame_position = 0 # Most recent frame processed in driver_state_history
+previous_risk_score = 0
+decay_factor = 0.8
 
 # Risk score thresholds
 risk_score_threshold = {
-    'SAFE': 0.05,
-    'LOW': 0.1,
-    'MEDIUM': 0.33,
-    'HIGH': 0.67
+    'LOW': 0.25,
+    'MEDIUM': 0.5,
+    'HIGH': 0.75
 }
+
+# Process video feed
+IMG_SIZE = 224
+MEAN = [0.485, 0.456, 0.406]
+STD = [0.229, 0.224, 0.225]
+
+CLASS_NAMES = [
+    "c0: safe driving",
+    "c1: texting right",
+    "c2: talking phone right",
+    "c3: texting left",
+    "c4: talking phone left",
+    "c5: operating radio",
+    "c6: drinking",
+    "c7: reaching behind",
+    "c8: hair/makeup",
+    "c9: talking passenger",
+]
+
+def show_feed(distraction, frame):
+    label = f"{CLASS_NAMES[distraction]}"
+    cv2.putText(frame, label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
+                0.8, (0, 0, 255), 2)
+
+    cv2.imshow("Driver Monitoring", frame)
+
+_, ax = plt.subplots()
+ax.grid(True)
+ax.set_ylabel('Risk Score [0, 1]')
+ax.set_xlabel('Time (s)')
+ax.set_title('Risk Score vs Time')
+ax.set_ylim((0, 1))
+for label, threshold in risk_score_threshold.items():
+    print(label)
+    plt.axhline(y=threshold, color='r', linestyle='--', label=label)
+
+total_time = []
+total_risk_score = []
+
+def plot_risk_score(time, risk_score):
+    total_time.append(time)
+    total_risk_score.append(risk_score)
+    ax.plot(total_time, total_risk_score, color='blue')
+    plt.draw()
+
+def preprocess_frame(frame, device):
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame = cv2.resize(frame, (IMG_SIZE, IMG_SIZE)).astype("float32") / 255.0
+    frame = (frame - MEAN) / STD
+    frame = np.transpose(frame, (2, 0, 1))
+    tensor = torch.tensor(frame, dtype=torch.float32).unsqueeze(0)
+    return tensor.to(device)
 
 def get_distraction_class(image):
     '''
@@ -55,21 +122,23 @@ def get_distraction_class(image):
     
 def longest_distraction_duration(batch, distraction):
     '''
-    Calculate the longest length of a specified distraction in the frame batch
+    Calculate the longest length of a specified distraction in the frame batch in seconds
     '''
     max_duration = 0
     current_duration = 0
-    previous_distraction = -1
+    previous_distraction = None
     
     for current_distraction in batch:
         if current_distraction == distraction and current_distraction == previous_distraction:
             current_duration += 1
+        elif current_distraction == distraction:
+            current_duration = 1
         else:
             current_duration = 0
 
         max_duration = max(max_duration, current_duration)
         previous_distraction = current_distraction
-    return max_duration
+    return max_duration / driver_state_history['fps']
 
 def calculate_risk_scores():
     # TODO calculate overall driver distraction score (SIGMOID)
@@ -83,51 +152,88 @@ def calculate_risk_scores():
     # Frequency over time horizon can be calculated based on how frequent (stable the model is) count as one for coulpe count, counts / total number of distractions
     # Multiply together and crunch into a normalization function (e.g. sigmoid with certain scaling)
 
-    current_batch = driver_state_history.states[current_frame_position:]
+    current_batch = driver_state_history['states'][current_frame_position:]
     risk_scores = dict.fromkeys(range(len(distraction_severity)), 0)
-
     for distraction in risk_scores:
         # Skip score calculations if distraction is not in batch
         if not distraction in current_batch:
             continue
 
         severity = distraction_severity[distraction]
-        duration = longest_distraction_duration(current_batch, distraction)
-        frequency = current_batch.count(distraction)
-        risk_scores[distraction] = severity * duration * frequency
-
+        duration = longest_distraction_duration(current_batch, distraction) / batch_size
+        frequency = current_batch.count(distraction) / len(current_batch)
+        risk_scores[distraction] = severity * duration * frequency * 10
+        print(f"Severity: {severity} || Duration: {duration} || Frequency: {frequency}")
     return risk_scores
+
+def normalize_risk_scores(risk_scores, decay_factor=0.9, k=1, threshold=2):
+    risk_score = sum([looped_risk_score for looped_risk_score in risk_scores.values()])
+    decayed_risk_score = decay_factor * previous_risk_score + risk_score # Exponential decay
+    normalized = 1 / (1 + np.exp(-k * (decayed_risk_score - threshold))) # Sigmoid normalization
+    print(f"Risk Scores: {risk_scores}")
+    print(f"Risk Score: {risk_score:.3f} || Decay Risk Score: {decayed_risk_score:.3f} || Norm: {normalized:.3f}")
+    return normalized
+
 
 def generate_safety_action():
     '''
     Using distraction score threshold value and find proper plan of action
     '''
     risk_scores = calculate_risk_scores() # TODO normalize score or softmax?
-    risk_score = risk_scores
+    risk_score = normalize_risk_scores(risk_scores)
+    previous_risk_score = risk_score
+    time = len(driver_state_history['states']) / driver_state_history['fps']
+    print(risk_score)
+    plot_risk_score(time, risk_score)
+    plt.pause(0.1)
 
-    if risk_score < risk_score_threshold['SAFE']:
-        print("Driving safely")
-    elif risk_score < risk_score_threshold['LOW']:
-        print("Showing indicator warning on dashboard!")
-        show_indicator(True)
-    elif risk_score < risk_score_threshold['MEDIUM']:
-        print("Sending audible warning!")
-        audio_warning()
-    elif risk_score < risk_score_threshold['HIGH']:
-        print("Performing safety autonomous takeover!")
+    if risk_score >= risk_score_threshold['HIGH']:
+        #print("[ACTION] HIGH: Autonomous takeover!")
         autonomous_takeover()
+    elif risk_score >= risk_score_threshold['MEDIUM']:
+        #print("[ACTION] MEDIUM: Audible warning!")
+        audio_warning()
+    elif risk_score >= risk_score_threshold['LOW']:
+        #print("[ACTION] LOW: Dashboard indicator!")
+        show_indicator(True)
+    else:
+        # If it's not high, medium, or low risk, it's safe driving
+        #print("Driving safely")
+        show_indicator(False) # Turn off the indicator if it was on
 
 def main():
     show_indicator(False) # Display normal indicator dashboard
     autonomous_takeover() # Setup CARLO simulator driving
 
+    # Check for video capture
+    capture = cv2.VideoCapture(VIDEO_PATH)
+    if not capture.isOpened():
+        print(f"Could not open video: {VIDEO_PATH}")
+        return
+    
     # Loop for stream of images (video)
-    for image, index in video:
+    index = 0
+    done = False
+    while not done:
+        index += 1
         # TODO Show current video processed and classification
-        distraction_class = get_distraction_class(image) # Get distraction class
-        driver_state_history.states.append(distraction_class) # Update driver state history
+        ret, frame = capture.read()
+        if not ret:
+            break
+
+        if keyboard.is_pressed('q'):
+            done = True
+        processed_frame = preprocess_frame(frame, 'cpu')
+        distraction_class = get_distraction_class(processed_frame) # Get distraction class
+        driver_state_history['states'].append(distraction_class) # Update driver state history
         if (index % batch_size) == 0: # Only calculate score once enough frames collected
             generate_safety_action()
+
+        show_feed(distraction_class, frame)
+
+        time.sleep(1/driver_state_history['fps'])
+
+    plt.show()
 
 if __name__=='__main__':
     main()
