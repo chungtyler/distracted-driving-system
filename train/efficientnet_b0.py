@@ -84,9 +84,9 @@ def train_model(model, train_loader, optimizer, criterion, device):
 
 class EfficientNet:
     def __init__(self, output_features):
-        self.weights = models.EfficientNet_B3_Weights.DEFAULT       # Pre-trained EfficientNet weights (B0 to B7)
+        self.weights = models.EfficientNet_B0_Weights.DEFAULT       # Pre-trained EfficientNet weights (B0 to B7)
         self.transform = self.weights.transforms()                  # Convert input images to standard format
-        self.model = models.efficientnet_b3(weights=self.weights)   # Load EfficientNet model with Pre-trained weights
+        self.model = models.efficientnet_b0(weights=self.weights)   # Load EfficientNet model with Pre-trained weights
 
         self.model.classifier = nn.Sequential(                                  # Replace linear layer to match classification problem
             nn.Dropout(p=0.2, inplace=True),                                    # Reduce overfitting (drops 20% of neurons randomly)
@@ -99,13 +99,12 @@ class EfficientNet:
 def main():
     '''LOAD DATA'''
     # Load EfficientNet Weights and Input Pre-Processing Settings
-    weights = models.EfficientNet_B3_Weights.DEFAULT # Pre-trained EfficientNet weights (B0 to B7)
+    weights = models.EfficientNet_B0_Weights.DEFAULT # Pre-trained EfficientNet weights (B0 to B7)
     transform = weights.transforms() # Convert input images to standard format
 
     # Load Dataset and Data Loaders
     dataset_path = 'C:/UWaterloo/Courses/ME 744 - Computational Intelligence/state-farm-distracted-driver-detection/imgs/train'
     dataset = datasets.ImageFolder(root=dataset_path, transform=transform)
-    y = dataset.targets
 
     # Load the CSV file
     driver_image_list = pd.read_csv('C:/UWaterloo/Courses/ME 744 - Computational Intelligence/state-farm-distracted-driver-detection/driver_imgs_list.csv')

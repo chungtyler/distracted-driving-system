@@ -4,10 +4,13 @@ import torch.optim as optim
 from torch.utils.data import Subset, DataLoader
 from torchvision import datasets, models
 from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 from sklearn import metrics
 import multiprocessing
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
+import os
 
 def plot_losses(ax, epoch, train_losses, val_losses):
     ax.clear()
@@ -99,17 +102,42 @@ def main():
     weights = models.EfficientNet_B0_Weights.DEFAULT # Pre-trained EfficientNet weights (B0 to B7)
     transform = weights.transforms() # Convert input images to standard format
 
+    # # Load Dataset and Data Loaders
+    # dataset_path = 'C:/UWaterloo/Courses/ME 744 - Computational Intelligence/state-farm-distracted-driver-detection/imgs/train'
+    # dataset = datasets.ImageFolder(root=dataset_path, transform=transform)
+    # y = dataset.targets
+
+    # train_indices, val_indices = train_test_split( # Split training dataset 80/20
+    #     list(range(len(y))),
+    #     stratify=y,
+    #     test_size=0.2,
+    #     random_state=50
+    # )
     # Load Dataset and Data Loaders
     dataset_path = 'C:/UWaterloo/Courses/ME 744 - Computational Intelligence/state-farm-distracted-driver-detection/imgs/train'
     dataset = datasets.ImageFolder(root=dataset_path, transform=transform)
-    y = dataset.targets
 
-    train_indices, val_indices = train_test_split( # Split training dataset 80/20
-        list(range(len(y))),
-        stratify=y,
-        test_size=0.2,
-        random_state=50
-    )
+    # Load the CSV file
+    driver_image_list = pd.read_csv('C:/UWaterloo/Courses/ME 744 - Computational Intelligence/state-farm-distracted-driver-detection/driver_imgs_list.csv')
+    driver_image_list["img"] = driver_image_list["img"].astype(str) # Convert to string file
+
+    # Get each folder filename
+    paths = [path for path, _ in dataset.samples]
+    basenames = [os.path.basename(path) for path in paths]
+
+    # Match each image with driver (subject number)
+    map_driver_image_list = pd.DataFrame({"img": basenames}).merge(driver_image_list[["img", "subject"]], on="img", how="left")
+
+    if map_driver_image_list["subject"].isna().any():
+        # If this triggers, your DATA_ROOT or CSV_PATH is off, or filenames differ
+        missing = map_driver_image_list[map_driver_image_list["subject"].isna()].head(5)
+        raise RuntimeError(f"Images not found in CSV (check paths). Examples:\n{missing}")
+
+    groups = map_driver_image_list["subject"].values  # one group per sample (driver id)
+
+    # Split so driver appears in both train and val
+    gss = GroupShuffleSplit(test_size=0.2, n_splits=1, random_state=42)
+    train_indices, val_indices = next(gss.split(basenames, groups=groups))
 
     train_dataset = Subset(dataset, train_indices) # Load training dataset (80%)
     val_dataset = Subset(dataset, val_indices) # Load validate dataset (20%)
