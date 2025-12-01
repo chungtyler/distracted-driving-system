@@ -202,11 +202,11 @@ def main():
 
     # Classification report (precision, recall, f1-score, support, accuracy, macro average, weighted average)
     classification_report = metrics.classification_report(y_true, y_predicted, digits=3)
-    print(f"Classification Report:\n{classification_report}")
+    print(f"=== Classification Report ===\n{classification_report}")
 
     # Top-K accuracy
     top_3_accuracy = metrics.top_k_accuracy_score(y_true, y_probabilities, k=3)
-    print(f"Top-3 Accuracy: {top_3_accuracy:.4f}")
+    print(f"=== Top-3 Accuracy on Validation Set: {top_3_accuracy:.4f} ===")
 
     plt.ioff()
     plt.show()

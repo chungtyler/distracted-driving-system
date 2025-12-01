@@ -39,6 +39,7 @@ def show_indicator(active: bool):
     img = _dashboard_warning if active else _dashboard_safe
 
     cv2.namedWindow(_WINDOW_NAME, cv2.WINDOW_NORMAL)
-    # cv2.resizeWindow(_WINDOW_NAME, 600, 200)
+    cv2.moveWindow(_WINDOW_NAME, 830, 525)
+    cv2.resizeWindow(_WINDOW_NAME, 875, 175)
     cv2.imshow(_WINDOW_NAME, img)
     cv2.waitKey(1)

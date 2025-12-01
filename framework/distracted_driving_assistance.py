@@ -1,9 +1,10 @@
 from framework.distraction_level.low_distraction import show_indicator
 from framework.distraction_level.medium_distrction import audio_warning
-from framework.distraction_level.high_distraction import autonomous_takeover
+from framework.distraction_level.high_distraction import start_simulator, activate_autonomous_takeover
 from train.efficientnet_b0 import EfficientNet
 
 import torch
+import torch.nn.functional as F
 import cv2
 import sys
 import os
@@ -12,6 +13,7 @@ import matplotlib.pyplot as plt
 import keyboard
 import time
 
+global root
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
@@ -43,12 +45,15 @@ efficientnet_b0.load_weights(MODEL_PATH)
 model = efficientnet_b0.model
 model.eval()
 
+is_autonomous_takeover_active = False
+
 # Driver state history to video FPS and states
 driver_state_history = {'fps': 30, 'states': []}
 
 # Risk score calculation parameters
 batch_size = 5 # Number of seconds to process to calculate risk score
 current_frame_position = 0 # Most recent frame processed in driver_state_history
+global previous_risk_score
 previous_risk_score = 0
 decay_factor = 0.8
 
@@ -77,21 +82,26 @@ CLASS_NAMES = [
     "c9: talking passenger",
 ]
 
-def show_feed(distraction, frame):
-    label = f"{CLASS_NAMES[distraction]}"
+def show_feed(confidence, distraction, frame):
+    #print(confidence)
+    label = f"{CLASS_NAMES[distraction].upper()} ({confidence*100:.1f}%)"
     cv2.putText(frame, label, (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
                 0.8, (0, 0, 255), 2)
 
     cv2.imshow("Driver Monitoring", frame)
-
-_, ax = plt.subplots()
+    cv2.moveWindow("Driver Monitoring", 175, 0)
+import matplotlib
+matplotlib.use("TkAgg")
+_, ax = plt.subplots(figsize=(9.6, 5.6), dpi=100)
+mngr = plt.get_current_fig_manager()
+mngr.window.wm_geometry("+250+875")
 ax.grid(True)
 ax.set_ylabel('Risk Score [0, 1]')
 ax.set_xlabel('Time (s)')
 ax.set_title('Risk Score vs Time')
 ax.set_ylim((0, 1))
 for label, threshold in risk_score_threshold.items():
-    print(label)
+    #print(label)
     plt.axhline(y=threshold, color='r', linestyle='--', label=label)
 
 total_time = []
@@ -117,8 +127,11 @@ def get_distraction_class(image):
     '''
     with torch.no_grad():
         output = model(image) # Generate distribution
-        _, predicted_class = torch.max(output, dim=1) # Get highest probable class
-        return predicted_class.item()
+        # _, predicted_class = torch.max(output, dim=1) # Get highest probable class
+        # return predicted_class.item()
+        probability = F.softmax(output, dim=1)
+        confidence, classification = torch.max(probability, dim=1)
+        return confidence.item(), classification.item()
     
 def longest_distraction_duration(batch, distraction):
     '''
@@ -163,15 +176,15 @@ def calculate_risk_scores():
         duration = longest_distraction_duration(current_batch, distraction) / batch_size
         frequency = current_batch.count(distraction) / len(current_batch)
         risk_scores[distraction] = severity * duration * frequency * 10
-        print(f"Severity: {severity} || Duration: {duration} || Frequency: {frequency}")
+        #print(f"Severity: {severity} || Duration: {duration} || Frequency: {frequency}")
     return risk_scores
 
-def normalize_risk_scores(risk_scores, decay_factor=0.9, k=1, threshold=2):
+def normalize_risk_scores(risk_scores, decay_factor=0.9, c1=1, c2=2.5):
     risk_score = sum([looped_risk_score for looped_risk_score in risk_scores.values()])
     decayed_risk_score = decay_factor * previous_risk_score + risk_score # Exponential decay
-    normalized = 1 / (1 + np.exp(-k * (decayed_risk_score - threshold))) # Sigmoid normalization
-    print(f"Risk Scores: {risk_scores}")
-    print(f"Risk Score: {risk_score:.3f} || Decay Risk Score: {decayed_risk_score:.3f} || Norm: {normalized:.3f}")
+    normalized = 1 / (1 + np.exp(-c1 * (np.asarray(decayed_risk_score) - c2))) # Sigmoid normalization
+   #print(f"Risk Scores: {risk_scores}")
+    #print(f"Risk Score: {risk_score:.3f} || Decay Risk Score: {decayed_risk_score:.3f} || Norm: {normalized:.3f}")
     return normalized
 
 
@@ -181,58 +194,127 @@ def generate_safety_action():
     '''
     risk_scores = calculate_risk_scores() # TODO normalize score or softmax?
     risk_score = normalize_risk_scores(risk_scores)
+    global previous_risk_score
     previous_risk_score = risk_score
     time = len(driver_state_history['states']) / driver_state_history['fps']
-    print(risk_score)
+    #print(risk_score)
     plot_risk_score(time, risk_score)
-    plt.pause(0.1)
+    #plt.pause(0.001)
+    root.after(0, lambda: plt.draw())
 
     if risk_score >= risk_score_threshold['HIGH']:
-        #print("[ACTION] HIGH: Autonomous takeover!")
-        autonomous_takeover()
+        show_indicator(True)
+        global is_autonomous_takeover_active
+        print(f"[ACTION] ☢️  HIGH: Autonomous takeover! || Risk Score: [{risk_score:.2f} / 1.00]")
+        if not is_autonomous_takeover_active:
+            is_autonomous_takeover_active = True
+            #print("[ACTION] HIGH: Autonomous takeover!")
+            activate_autonomous_takeover(risk_score)
     elif risk_score >= risk_score_threshold['MEDIUM']:
-        #print("[ACTION] MEDIUM: Audible warning!")
-        audio_warning()
+        print(f"[ACTION] 🛑 MEDIUM: Audible warning! || Risk Score: [{risk_score:.2f} / 1.00]")
+        clamped_score = (risk_score - risk_score_threshold['MEDIUM']) / (risk_score_threshold['HIGH'] - risk_score_threshold['MEDIUM'])
+        
+        audio_warning(clamped_score, max(risk_scores, key=risk_scores.get))
+        show_indicator(True)
     elif risk_score >= risk_score_threshold['LOW']:
-        #print("[ACTION] LOW: Dashboard indicator!")
+        print(f"[ACTION] ⚠️  LOW: Dashboard indicator! || Risk Score: [{risk_score:.2f} / 1.00]")
         show_indicator(True)
     else:
         # If it's not high, medium, or low risk, it's safe driving
         #print("Driving safely")
         show_indicator(False) # Turn off the indicator if it was on
 
-def main():
-    show_indicator(False) # Display normal indicator dashboard
-    autonomous_takeover() # Setup CARLO simulator driving
-
-    # Check for video capture
-    capture = cv2.VideoCapture(VIDEO_PATH)
-    if not capture.isOpened():
-        print(f"Could not open video: {VIDEO_PATH}")
-        return
-    
-    # Loop for stream of images (video)
-    index = 0
-    done = False
-    while not done:
-        index += 1
+def video_loop():
+        global capture, all_frames, index, last_frame, counter
+        
+        # Loop for stream of images (video)
+        #index = 0
+        done = False
+        X = 10
+        #while not done:
         # TODO Show current video processed and classification
         ret, frame = capture.read()
+        #print(len(all_frames))
+        #print(batch_size)
+
         if not ret:
-            break
+            final_frames = all_frames[-X:]
+            frame = final_frames[index%X]
+            index += 1
+        else:
+            all_frames.append(frame)
 
         if keyboard.is_pressed('q'):
             done = True
         processed_frame = preprocess_frame(frame, 'cpu')
-        distraction_class = get_distraction_class(processed_frame) # Get distraction class
+        confidence, distraction_class = get_distraction_class(processed_frame) # Get distraction class
         driver_state_history['states'].append(distraction_class) # Update driver state history
-        if (index % batch_size) == 0: # Only calculate score once enough frames collected
+        if (counter % batch_size) == 0: # Only calculate score once enough frames collected
             generate_safety_action()
+            plt.gcf().canvas.draw_idle()
+            plt.gcf().canvas.flush_events()
 
-        show_feed(distraction_class, frame)
+        show_feed(confidence, distraction_class, frame)
+        counter += 1
 
-        time.sleep(1/driver_state_history['fps'])
+        #time.sleep(1/driver_state_history['fps'])
+        # else:
+        #     if index == len(final_frames):
+        #         final_frames = all_frames[-X:]
+        #         frame = final_frames[index]
+        #         #for frame in final_frames:
+        #         if keyboard.is_pressed('q'):
+        #             done = True
+        #         processed_frame = preprocess_frame(frame, 'cpu')
+        #         distraction_class = get_distraction_class(processed_frame) # Get distraction class
+        #         driver_state_history['states'].append(distraction_class) # Update driver state history
+        #         if (len(all_frames) % batch_size) == 0: # Only calculate score once enough frames collected
+        #             generate_safety_action()
+        #             plt.gcf().canvas.draw_idle()
+        #             plt.gcf().canvas.flush_events()
 
+        #         show_feed(distraction_class, frame)
+
+        #         time.sleep(1/driver_state_history['fps'])
+        #         #break
+        #         index += 1
+        root.after(int(1000/driver_state_history['fps']), video_loop)
+
+import threading
+
+def run_video():
+    video_loop()               # process one loop iteration
+    root.after(1, run_video)   # schedule next
+
+def main():
+    global root
+    plt.ion()
+    show_indicator(False) # Display normal indicator dashboard
+    root = start_simulator()
+    #threading.Thread(target=video_loop, daemon=True).start()
+    #run_video()
+    # Check for video capture
+    global capture, all_frames, ret, last_frame, index, counter
+    ret = True
+    index = 0
+    counter = 0
+    all_frames = []
+    capture = cv2.VideoCapture(VIDEO_PATH)
+    if not capture.isOpened():
+        print(f"Could not open video: {VIDEO_PATH}")
+        return
+    os.system('cls')
+    root.after(0, video_loop)
+
+    def keep_plot_alive():
+        plt.pause(0.001)
+        root.after(100, keep_plot_alive)
+
+    keep_plot_alive()
+
+    root.mainloop()
+    print("YES")
+    plt.ioff()
     plt.show()
 
 if __name__=='__main__':
